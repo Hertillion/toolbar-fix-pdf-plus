@@ -23,6 +23,7 @@ export class ColorPalette extends PDFPlusComponent {
     actionMenuEl: HTMLElement | null;
     displayTextFormatMenuEl: HTMLElement | null;
     writeFileButtonEl: HTMLElement | null;
+    saveFormButtonEl: HTMLElement | null;
     cropButtonEl: HTMLElement | null;
     statusContainerEl: HTMLElement | null;
     statusEl: HTMLElement | null;
@@ -45,6 +46,7 @@ export class ColorPalette extends PDFPlusComponent {
         this.actionMenuEl = null;
         this.displayTextFormatMenuEl = null;
         this.writeFileButtonEl = null;
+        this.saveFormButtonEl = null;
         this.cropButtonEl = null;
         this.statusContainerEl = null;
         this.statusEl = null;
@@ -84,6 +86,7 @@ export class ColorPalette extends PDFPlusComponent {
             this.addImportButton(this.paletteEl);
         } else {
             this.addWriteFileToggle(this.paletteEl);
+            this.addSaveFormButton(this.paletteEl);
         }
 
         this.statusContainerEl = this.paletteEl.createDiv('pdf-plus-color-palette-status-container');
@@ -370,6 +373,62 @@ export class ColorPalette extends PDFPlusComponent {
     removeWriteFileToggle() {
         this.writeFileButtonEl?.remove();
         this.writeFileButtonEl = null;
+    }
+
+    addSaveFormButton(paletteEl: HTMLElement) {
+        this.removeSaveFormButton();
+
+        if (!this.plugin.settings.enablePdfFormSave) return;
+
+        this.saveFormButtonEl = paletteEl.createDiv('clickable-icon', (el) => {
+            setIcon(el, 'lucide-save');
+            setTooltip(el, 'Save PDF form fields');
+            el.toggleClass('is-disabled', !this.lib.isEditable(this.child));
+
+            el.addEventListener('click', async () => {
+                if (!this.lib.isEditable(this.child)) {
+                    const menu = new Menu()
+                        .addItem((item) => {
+                            item.setIcon('lucide-settings')
+                                .setTitle('Enable PDF editing...')
+                                .onClick(() => {
+                                    this.plugin.openSettingTab()
+                                        .scrollToHeading('edit');
+                                });
+                        });
+                    showMenuUnderParentEl(menu, el);
+                    return;
+                }
+
+                try {
+                    await this.lib.forms.saveFormFields(this.child);
+                } catch (e) {
+                    new Notice(`${this.plugin.manifest.name}: Failed to save PDF form fields.`);
+                    console.error(e);
+                }
+            });
+        });
+
+        // Hide the button if no forms are detected.
+        (async () => {
+            try {
+                const hasForms = await this.lib.forms.hasForms(this.child);
+                if (!hasForms) {
+                    this.removeSaveFormButton();
+                }
+            } catch {
+                // ignore
+            }
+        })();
+
+        if (this.writeFileButtonEl) {
+            paletteEl.insertAfter(this.saveFormButtonEl, this.writeFileButtonEl);
+        }
+    }
+
+    removeSaveFormButton() {
+        this.saveFormButtonEl?.remove();
+        this.saveFormButtonEl = null;
     }
 
     addImportButton(paletteEl: HTMLElement) {

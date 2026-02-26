@@ -1282,6 +1282,10 @@ declare module 'obsidian' {
         getConfig(name: 'newFileLocation'): 'root' | 'current' | 'folder';
         getConfig(name: 'attachmentFolderPath'): string;
         getAvailablePath(pathWithoutExtension: string, extension: string): string;
+        /** Obsidian’s runtime accepts Uint8Array in many cases; widen typing for pdf-lib/pdf.js outputs. */
+        modifyBinary(file: TFile, data: ArrayBuffer | Uint8Array): Promise<void>;
+        /** Obsidian’s runtime accepts Uint8Array in many cases; widen typing for pdf-lib/pdf.js outputs. */
+        createBinary(path: string, data: ArrayBuffer | Uint8Array): Promise<TFile>;
     }
 
     interface MetadataCache {

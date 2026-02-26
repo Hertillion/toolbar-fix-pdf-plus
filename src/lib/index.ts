@@ -7,6 +7,7 @@ import PDFPlus from 'main';
 import { ColorPalette, ColorPaletteState } from 'color-palette';
 import { copyLinkLib } from './copy-link';
 import { HighlightLib } from './highlights';
+import { PdfFormsLib } from './forms';
 import { WorkspaceLib } from './workspace-lib';
 import { cropCanvas, encodeLinktext, getDirectPDFObj, isVersionNewerThan, parsePDFSubpath, removeExtension, rotateCanvas, toSingleLine, isTargetNode } from 'utils';
 import { PDFPlusCommands } from './commands';
@@ -47,6 +48,7 @@ export class PDFPlusLib {
     commands: PDFPlusCommands;
     copyLink: copyLinkLib;
     highlight: HighlightLib;
+    forms: PdfFormsLib;
     workspace: WorkspaceLib;
     composer: PDFComposer;
     dummyFileManager: DummyFileManager;
@@ -70,6 +72,7 @@ export class PDFPlusLib {
         this.commands = new PDFPlusCommands(plugin);
         this.copyLink = new copyLinkLib(plugin);
         this.highlight = new HighlightLib(plugin);
+        this.forms = new PdfFormsLib(plugin);
         this.workspace = new WorkspaceLib(plugin);
         this.composer = new PDFComposer(plugin);
         this.dummyFileManager = new DummyFileManager(plugin);
@@ -836,7 +839,10 @@ export class PDFPlusLib {
         return await this.loadPdfLibDocumentFromArrayBuffer(buffer);
     }
 
-    async loadPdfLibDocumentFromArrayBuffer(buffer: ArrayBuffer, readonly: boolean = false): Promise<PDFDocument> {
+    async loadPdfLibDocumentFromArrayBuffer(buffer: ArrayBuffer | Uint8Array, readonly: boolean = false): Promise<PDFDocument> {
+        if (buffer instanceof Uint8Array) {
+            buffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
+        }
         try {
             return await PDFDocument.load(buffer, { ignoreEncryption: readonly });
         } catch (e) {
