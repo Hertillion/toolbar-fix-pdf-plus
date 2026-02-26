@@ -237,6 +237,9 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                         viewerContainerEl.removeEventListener('pointerup', onPointerUp);
                         isModEvent = false;
                     };
+
+                    // Track form edits (and optionally auto-save) for form-fillable PDFs.
+                    plugin.lib.forms.registerFormChangeListeners(this, viewerContainerEl);
                 }
 
                 const addColorPaletteToToolbar = () => {
@@ -309,6 +312,7 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
         },
         unload(old) {
             return function (this: PDFViewerChild) {
+                plugin.lib.forms.onChildUnload(this);
                 this.component?.unload();
                 return old.call(this);
             };

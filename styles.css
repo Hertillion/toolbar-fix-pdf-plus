@@ -241,6 +241,67 @@ settings:
     }
 }
 
+.pdf-plus-form-save-indicator {
+    display: none;
+    font-size: var(--font-ui-smaller);
+    font-variant-numeric: tabular-nums;
+    padding: 0 var(--size-2-2);
+    line-height: 1;
+    white-space: nowrap;
+    user-select: none;
+    -webkit-user-select: none;
+    align-self: center;
+
+    &.is-dirty {
+        color: var(--text-warning);
+    }
+
+    &.is-saving {
+        color: var(--text-accent);
+    }
+}
+
+.annotationLayer input[data-pdf-plus-was-disabled],
+.annotationLayer textarea[data-pdf-plus-was-disabled],
+.annotationLayer select[data-pdf-plus-was-disabled] {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.pdf-plus-form-save-confirm-text {
+    margin-bottom: var(--size-4-2);
+}
+
+.pdf-plus-form-save-confirm-actions {
+    display: flex;
+    gap: var(--size-2-2);
+    justify-content: flex-end;
+}
+
+.pdf-plus-form-save-wait-row {
+    display: flex;
+    align-items: center;
+    gap: var(--size-2-3);
+    margin-bottom: var(--size-4-2);
+}
+
+.pdf-plus-form-save-wait-spinner.is-spinning > svg {
+    animation: pdf-plus-spin 1s linear infinite;
+}
+
+.pdf-plus-form-save-wait-message {
+    color: var(--text-muted);
+}
+
+@keyframes pdf-plus-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 .menu .menu-item.pdf-plus-color-menu-item {
     padding-left: 0;
 
@@ -578,6 +639,62 @@ body {
     z-index: 1000;
     border: dashed var(--background-modifier-border) 2px;
     background-color: hsla(var(--interactive-accent-hsl), 0.15);
+}
+
+/* PDF form fields (annotation layer widgets)
+ * Obsidian themes often apply generous padding/line-height to inputs, which can make PDF form widgets
+ * behave as if they have very little usable space (e.g. only one digit visible at a time).
+ * Keep these controls compact so the usable text area matches the visual box. */
+.pdf-container .annotationLayer input,
+.pdf-container .annotationLayer textarea,
+.pdf-container .annotationLayer select {
+    box-sizing: border-box;
+    min-height: 0;
+}
+
+.pdf-container .annotationLayer input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="file"]):not([type="image"]):not([type="range"]):not([type="color"]),
+.pdf-container .annotationLayer textarea {
+    padding: 0 1px !important;
+    line-height: 1 !important;
+    margin: 0 !important;
+}
+
+/* Keep PDF.js choice/check widgets stable against theme input styles.
+ * Some themes apply select/checkbox styling that hides selected dropdown text
+ * or shrinks checkbox marks, even though values are correct internally. */
+.pdf-container .annotationLayer select {
+    margin: 0 !important;
+    padding: 0 1px !important;
+    line-height: 1.1 !important;
+    background: transparent !important;
+    color: inherit !important;
+    -webkit-text-fill-color: currentColor !important;
+    appearance: auto !important;
+    -webkit-appearance: menulist !important;
+    text-indent: 0 !important;
+}
+
+.pdf-container .annotationLayer input[type="checkbox"],
+.pdf-container .annotationLayer input[type="radio"] {
+    margin: 0 !important;
+    padding: 0 !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    box-sizing: border-box !important;
+    box-shadow: none !important;
+    transform: none !important;
+    appearance: auto !important;
+    -webkit-appearance: auto !important;
+    accent-color: currentColor !important;
+}
+
+/* Keep words intact in multiline PDF form fields.
+ * This prevents single words from being split across lines; font auto-fit handles sizing. */
+.pdf-container .annotationLayer textarea {
+    word-break: normal !important;
+    overflow-wrap: normal !important;
+    word-wrap: normal !important;
+    hyphens: none !important;
 }
 
 /* From Obsidian's app.css (.annotationLayer .mod-focused /  .annotationLayer .boundingRect)*/

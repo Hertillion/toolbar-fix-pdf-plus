@@ -502,6 +502,25 @@ export class PDFPlusContextMenu extends PDFPlusMenu {
             });
         }
 
+        // Save form fields into the PDF file
+        if (lib.isEditable(child) && plugin.settings.enablePdfFormSave && isVisible('action')) {
+            const hasForms = await lib.forms.hasForms(child);
+            if (hasForms) {
+                this.addItem((item) => {
+                    return item
+                        .setSection('action')
+                        .setTitle('Save PDF form fields')
+                        .setIcon('lucide-save')
+                        .onClick(() => {
+                            lib.forms.saveFormFields(child).catch((e) => {
+                                new Notice(`${plugin.manifest.name}: Failed to save PDF form fields.`);
+                                console.error(e);
+                            });
+                        });
+                });
+            }
+        }
+
         //// Add items ////
 
         if (selectedText) {

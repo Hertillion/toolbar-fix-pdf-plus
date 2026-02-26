@@ -16,6 +16,20 @@ export const patchPDFView = (plugin: PDFPlus): boolean => {
 
     if (!plugin.patchStatus.pdfView) {
         plugin.register(around(pdfView.constructor.prototype, {
+            save(old) {
+                return async function (this: PDFView, ...args: any[]) {
+                    const child = this.viewer?.child;
+                    if (child && plugin.settings.enablePdfFormSave && lib.isEditable(child)) {
+                        try {
+                            const saved = await lib.forms.saveFormFields(child, { silent: true });
+                            if (saved) return;
+                        } catch (e) {
+                            console.error(e);
+                        }
+                    }
+                    return old.call(this, ...args);
+                };
+            },
             getState(old) {
                 return function () {
                     const ret = old.call(this);

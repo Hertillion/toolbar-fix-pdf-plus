@@ -152,6 +152,14 @@ export interface PDFPlusSettings {
 	alwaysRecordHistory: boolean;
 	renderMarkdownInStickyNote: boolean;
 	enablePDFEdit: boolean;
+	/** Enable saving form field values into PDFs (requires PDF editing enabled). */
+	enablePdfFormSave: boolean;
+	/** Auto-save PDF form fields after changes (debounced). */
+	autoSavePdfForms: boolean;
+	/** Debounce interval for auto-saving form fields (ms). */
+	autoSavePdfFormsDebounceMs: number;
+	/** Warn or block when closing/switching away with unsaved PDF form edits. */
+	confirmUnsavedPdfFormsOnClose: boolean;
 	author: string;
 	writeHighlightToFileOpacity: number;
 	defaultWriteFileToggle: boolean;
@@ -427,6 +435,10 @@ export const DEFAULT_SETTINGS: PDFPlusSettings = {
 	alwaysRecordHistory: true,
 	renderMarkdownInStickyNote: false,
 	enablePDFEdit: false,
+	enablePdfFormSave: true,
+	autoSavePdfForms: false,
+	autoSavePdfFormsDebounceMs: 2000,
+	confirmUnsavedPdfFormsOnClose: true,
 	author: '',
 	writeHighlightToFileOpacity: 0.2,
 	defaultWriteFileToggle: false,
@@ -1656,6 +1668,26 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 					const inputEl = (setting.components[0] as TextComponent).inputEl;
 					inputEl.toggleClass('error', !inputEl.value);
 				});
+
+			this.addToggleSetting('enablePdfFormSave', () => this.redisplay())
+				.setName('Enable saving PDF form fields')
+				.setDesc('Persist edits in form-fillable PDFs by writing form field values back into the PDF file (without flattening).');
+
+			if (this.plugin.settings.enablePdfFormSave) {
+				this.addToggleSetting('autoSavePdfForms', () => this.redisplay())
+					.setName('Auto-save PDF form fields')
+					.setDesc('When enabled, PDF++ will automatically save form changes after a short delay.');
+
+				if (this.plugin.settings.autoSavePdfForms) {
+					this.addNumberSetting('autoSavePdfFormsDebounceMs')
+						.setName('Auto-save debounce (ms)')
+						.setDesc('How long to wait after the last form edit before saving.');
+				}
+
+				this.addToggleSetting('confirmUnsavedPdfFormsOnClose')
+					.setName('Confirm unsaved form edits when closing PDF')
+					.setDesc('When leaving a PDF with unsaved form edits, show a prompt. If auto-save is enabled, PDF++ will show a blocking “Saving...” dialog until save completes (or you cancel leaving).');
+			}
 			// this.addToggleSetting('enableEditEncryptedPDF')
 			// .setName('Enable editing encrypted PDF files');
 		}

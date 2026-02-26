@@ -113,6 +113,10 @@ export class PDFPlusCommands extends PDFPlusLibSubmodule {
                 name: 'Disable PDF edit',
                 checkCallback: (checking) => this.setWriteFile(checking, false)
             }, {
+                id: 'save-pdf-form-fields',
+                name: 'Save PDF form fields',
+                checkCallback: (checking) => this.savePdfFormFields(checking)
+            }, {
                 id: 'toggle-auto-focus',
                 name: 'Toggle auto-focus',
                 callback: () => this.toggleAutoFocus()
@@ -558,6 +562,26 @@ export class PDFPlusCommands extends PDFPlusLibSubmodule {
         if (!checking) {
             palette.setWriteFile(writeFile);
         }
+        return true;
+    }
+
+    savePdfFormFields(checking: boolean) {
+        const child = this.lib.getPDFViewerChild(true);
+        if (!child) return false;
+        if (!this.settings.enablePdfFormSave) return false;
+        if (!this.lib.isEditable(child)) return false;
+
+        if (!checking) {
+            (async () => {
+                try {
+                    await this.lib.forms.saveFormFields(child);
+                } catch (e) {
+                    new Notice(`${this.plugin.manifest.name}: Failed to save PDF form fields.`);
+                    console.error(e);
+                }
+            })();
+        }
+
         return true;
     }
 

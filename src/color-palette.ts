@@ -23,6 +23,9 @@ export class ColorPalette extends PDFPlusComponent {
     actionMenuEl: HTMLElement | null;
     displayTextFormatMenuEl: HTMLElement | null;
     writeFileButtonEl: HTMLElement | null;
+    saveFormButtonEl: HTMLElement | null;
+    saveFormIndicatorEl: HTMLElement | null;
+    unregisterFormStateListener: (() => void) | null;
     cropButtonEl: HTMLElement | null;
     statusContainerEl: HTMLElement | null;
     statusEl: HTMLElement | null;
@@ -45,6 +48,9 @@ export class ColorPalette extends PDFPlusComponent {
         this.actionMenuEl = null;
         this.displayTextFormatMenuEl = null;
         this.writeFileButtonEl = null;
+        this.saveFormButtonEl = null;
+        this.saveFormIndicatorEl = null;
+        this.unregisterFormStateListener = null;
         this.cropButtonEl = null;
         this.statusContainerEl = null;
         this.statusEl = null;
@@ -84,6 +90,7 @@ export class ColorPalette extends PDFPlusComponent {
             this.addImportButton(this.paletteEl);
         } else {
             this.addWriteFileToggle(this.paletteEl);
+            this.addSaveFormButton(this.paletteEl);
         }
 
         this.statusContainerEl = this.paletteEl.createDiv('pdf-plus-color-palette-status-container');
@@ -95,6 +102,7 @@ export class ColorPalette extends PDFPlusComponent {
     }
 
     onunload() {
+        this.removeSaveFormButton();
         this.spacerEl?.remove();
         if (this.paletteEl) {
             this.paletteEl.remove();
@@ -370,6 +378,110 @@ export class ColorPalette extends PDFPlusComponent {
     removeWriteFileToggle() {
         this.writeFileButtonEl?.remove();
         this.writeFileButtonEl = null;
+    }
+
+    addSaveFormButton(paletteEl: HTMLElement) {
+        this.removeSaveFormButton();
+
+        if (!this.plugin.settings.enablePdfFormSave) return;
+
+        this.saveFormButtonEl = paletteEl.createDiv('clickable-icon', (el) => {
+            setIcon(el, 'lucide-save');
+            setTooltip(el, 'Save PDF form fields');
+            el.toggleClass('is-disabled', !this.lib.isEditable(this.child));
+
+            el.addEventListener('click', async () => {
+                if (!this.lib.isEditable(this.child)) {
+                    const menu = new Menu()
+                        .addItem((item) => {
+                            item.setIcon('lucide-settings')
+                                .setTitle('Enable PDF editing...')
+                                .onClick(() => {
+                                    this.plugin.openSettingTab()
+                                        .scrollToHeading('edit');
+                                });
+                        });
+                    showMenuUnderParentEl(menu, el);
+                    return;
+                }
+
+                try {
+                    el.addClass('is-active');
+                    await this.lib.forms.saveFormFields(this.child);
+                } catch (e) {
+                    new Notice(`${this.plugin.manifest.name}: Failed to save PDF form fields.`);
+                    console.error(e);
+                } finally {
+                    el.removeClass('is-active');
+                }
+            });
+        });
+
+        this.saveFormIndicatorEl = paletteEl.createSpan('pdf-plus-form-save-indicator');
+
+        // Position save button and indicator together after the write-file toggle.
+        if (this.writeFileButtonEl) {
+            paletteEl.insertAfter(this.saveFormButtonEl, this.writeFileButtonEl);
+        }
+        // Always position indicator right after the save button.
+        if (this.saveFormButtonEl && this.saveFormIndicatorEl) {
+            this.saveFormButtonEl.insertAdjacentElement('afterend', this.saveFormIndicatorEl);
+        }
+
+        this.unregisterFormStateListener = this.lib.forms.registerStateListener(this.child, ({ dirty, saving, progress }) => {
+            this.updateFormSaveIndicator(dirty, saving, progress);
+        });
+
+        // Push initial state so the indicator shows "Unsaved" if the form was already dirty.
+        this.updateFormSaveIndicator(
+            this.lib.forms.isDirty(this.child),
+            this.lib.forms.isSaving(this.child),
+            0,
+        );
+
+        // Hide the button if no forms are detected.
+        (async () => {
+            try {
+                const hasForms = await this.lib.forms.hasForms(this.child);
+                if (!hasForms) {
+                    this.removeSaveFormButton();
+                }
+            } catch {
+                // ignore
+            }
+        })();
+    }
+
+    removeSaveFormButton() {
+        this.unregisterFormStateListener?.();
+        this.unregisterFormStateListener = null;
+        this.saveFormButtonEl?.remove();
+        this.saveFormButtonEl = null;
+        this.saveFormIndicatorEl?.remove();
+        this.saveFormIndicatorEl = null;
+    }
+
+    private updateFormSaveIndicator(dirty: boolean, saving: boolean, progress: number) {
+        const el = this.saveFormIndicatorEl;
+        if (!el) return;
+
+        if (saving) {
+            const pct = Math.min(99, Math.max(0, Math.round(progress)));
+            el.setText(`${pct}%`);
+            el.toggleClass('is-saving', true);
+            el.toggleClass('is-dirty', false);
+            el.style.display = 'inline-flex';
+        } else if (dirty) {
+            el.setText('Unsaved');
+            el.toggleClass('is-saving', false);
+            el.toggleClass('is-dirty', true);
+            el.style.display = 'inline-flex';
+        } else {
+            el.setText('');
+            el.toggleClass('is-saving', false);
+            el.toggleClass('is-dirty', false);
+            el.style.display = 'none';
+        }
     }
 
     addImportButton(paletteEl: HTMLElement) {
