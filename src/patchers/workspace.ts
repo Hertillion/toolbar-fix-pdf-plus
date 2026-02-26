@@ -1,4 +1,4 @@
-import { OpenViewState, PaneType, Workspace, parseLinktext, Platform } from 'obsidian';
+import { OpenViewState, PaneType, TFile, Workspace, WorkspaceLeaf, parseLinktext, Platform } from 'obsidian';
 import { around } from 'monkey-around';
 
 import PDFPlus from 'main';
@@ -8,6 +8,37 @@ import { focusObsidian } from 'utils';
 export const patchWorkspace = (plugin: PDFPlus) => {
     const app = plugin.app;
     const lib = plugin.lib;
+    const pendingUnsavedGuardByLeaf = new WeakMap<WorkspaceLeaf, Promise<boolean>>();
+
+    const guardUnsavedPdfFormChanges = async (leaf: WorkspaceLeaf, nextFilePath?: string | null) => {
+        const view = leaf.view;
+        if (!view || !lib.isPDFView(view)) return true;
+        const child = view.viewer?.child;
+        if (!child || !(child.file instanceof TFile)) return true;
+
+        if (nextFilePath && child.file.path === nextFilePath) {
+            return true;
+        }
+        return lib.forms.handlePendingFormChangesBeforeClose(child);
+    };
+    const guardUnsavedPdfFormChangesOnce = async (leaf: WorkspaceLeaf, nextFilePath?: string | null) => {
+        const existing = pendingUnsavedGuardByLeaf.get(leaf);
+        if (existing) return existing;
+        const promise = guardUnsavedPdfFormChanges(leaf, nextFilePath).finally(() => {
+            pendingUnsavedGuardByLeaf.delete(leaf);
+        });
+        pendingUnsavedGuardByLeaf.set(leaf, promise);
+        return promise;
+    };
+    const runWithUnsavedPdfFormGuard = async (
+        leaf: WorkspaceLeaf,
+        nextFilePath: string | null,
+        run: () => any,
+    ) => {
+        const proceed = await guardUnsavedPdfFormChangesOnce(leaf, nextFilePath);
+        if (!proceed) return;
+        return run();
+    };
 
     plugin.register(around(Workspace.prototype, {
         openLinkText(old) {
@@ -54,6 +85,35 @@ export const patchWorkspace = (plugin: PDFPlus) => {
                 return old.call(this, linktext, sourcePath, newLeaf, openViewState);
             };
         }
+    }));
+
+    // Intercept leaf file-open to guard unsaved PDF form edits.
+    plugin.register(around(WorkspaceLeaf.prototype, {
+        openFile(old) {
+            return async function (this: WorkspaceLeaf, file: TFile, openState?: any) {
+                return runWithUnsavedPdfFormGuard(this, file.path, () => old.call(this, file, openState));
+            };
+        },
+        setViewState(old) {
+            return async function (this: WorkspaceLeaf, viewState: any, eState?: any) {
+                const currentView = this.view;
+                const isCurrentPdf = !!currentView && lib.isPDFView(currentView);
+                if (isCurrentPdf) {
+                    const nextType = viewState?.type;
+                    const nextFilePath = typeof viewState?.state?.file === 'string' ? viewState.state.file : null;
+                    // Guard transitions that leave the currently opened PDF, including tab close.
+                    if (nextType !== 'pdf' || !nextFilePath || currentView.file?.path !== nextFilePath) {
+                        return runWithUnsavedPdfFormGuard(this, nextFilePath, () => old.call(this, viewState, eState));
+                    }
+                }
+                return old.call(this, viewState, eState);
+            };
+        },
+        detach(old) {
+            return async function (this: WorkspaceLeaf, ...args: any[]) {
+                return runWithUnsavedPdfFormGuard(this, null, () => old.apply(this, args));
+            };
+        },
     }));
 
     plugin.patchStatus.workspace = true;

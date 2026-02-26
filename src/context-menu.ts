@@ -512,7 +512,10 @@ export class PDFPlusContextMenu extends PDFPlusMenu {
                         .setTitle('Save PDF form fields')
                         .setIcon('lucide-save')
                         .onClick(() => {
-                            lib.forms.saveFormFields(child).catch((e) => console.error(e));
+                            lib.forms.saveFormFields(child).catch((e) => {
+                                new Notice(`${plugin.manifest.name}: Failed to save PDF form fields.`);
+                                console.error(e);
+                            });
                         });
                 });
             }

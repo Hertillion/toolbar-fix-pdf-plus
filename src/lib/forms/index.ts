@@ -1,4 +1,4 @@
-import { Notice, TFile } from 'obsidian';
+import { Modal, Notice, TFile, setIcon } from 'obsidian';
 
 import { PDFDocument } from '@cantoo/pdf-lib';
 
@@ -40,11 +40,17 @@ type ChildSaveState = {
     queued: boolean;
     queuedSilent: boolean;
     timerId: number | null;
+    disposed: boolean;
 };
 
 type CachedPdfDoc = {
     pdfDoc: PDFDocument;
-    writeMtime: number;
+    freshness: FileFreshness;
+};
+
+type FileFreshness = {
+    mtime: number;
+    size: number;
 };
 
 type PDFDocumentLike = {
@@ -90,6 +96,11 @@ function coerceToFieldValue(value: unknown): PdfFormFieldValue {
 }
 
 export class PdfFormsLib extends PDFPlusLibSubmodule {
+    private readonly closeSaveModalOptions = {
+        title: 'Saving PDF form fields',
+        message: 'Saving changes before closing...',
+    };
+
     private childState = new WeakMap<PDFViewerChild, ChildSaveState>();
     private autoFitRegistered = new WeakSet<PDFViewerChild>();
     private autoFitRafByEl = new WeakMap<HTMLElement, number>();
@@ -101,15 +112,43 @@ export class PdfFormsLib extends PDFPlusLibSubmodule {
 
     constructor(plugin: PDFPlus) {
         super(plugin);
+        this.plugin.registerEvent(this.app.vault.on('modify', (file) => {
+            if (!(file instanceof TFile) || file.extension !== 'pdf') return;
+            this.invalidatePdfDocCache(file.path);
+        }));
+        this.plugin.registerEvent(this.app.vault.on('delete', (file) => {
+            if (!(file instanceof TFile) || file.extension !== 'pdf') return;
+            this.invalidatePdfDocCache(file.path);
+        }));
+        this.plugin.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
+            if (!(file instanceof TFile) || file.extension !== 'pdf') return;
+            this.invalidatePdfDocCache(oldPath);
+            this.invalidatePdfDocCache(file.path);
+        }));
+    }
+
+    private getFileFreshness(file: TFile): FileFreshness {
+        return { mtime: file.stat.mtime, size: file.stat.size };
+    }
+
+    private isFreshnessEqual(a: FileFreshness, b: FileFreshness): boolean {
+        return a.mtime === b.mtime && a.size === b.size;
     }
 
     private getState(child: PDFViewerChild): ChildSaveState {
         let state = this.childState.get(child);
         if (!state) {
-            state = { dirty: false, inFlight: false, queued: false, queuedSilent: true, timerId: null };
+            state = { dirty: false, inFlight: false, queued: false, queuedSilent: true, timerId: null, disposed: false };
             this.childState.set(child, state);
         }
         return state;
+    }
+
+    private isChildUsableForSave(child: PDFViewerChild, state?: ChildSaveState): boolean {
+        const saveState = state ?? this.getState(child);
+        if (saveState.disposed) return false;
+        if ((child as any).unloaded) return false;
+        return child.file instanceof TFile;
     }
 
     isEnabled() {
@@ -137,6 +176,149 @@ export class PdfFormsLib extends PDFPlusLibSubmodule {
         return this.getState(child).inFlight;
     }
 
+    shouldConfirmUnsavedOnClose(): boolean {
+        return !!this.plugin.settings.confirmUnsavedPdfFormsOnClose;
+    }
+
+    async handlePendingFormChangesBeforeClose(child: PDFViewerChild): Promise<boolean> {
+        if (!this.shouldConfirmUnsavedOnClose()) return true;
+        if (!this.isEnabled()) return true;
+        if (!this.isDirty(child)) return true;
+
+        if (this.isAutoSaveEnabled()) {
+            return await this.waitForSaveWithModal(child, this.closeSaveModalOptions);
+        }
+
+        const action = await this.showUnsavedChangesPromptModal();
+        if (action === 'cancel') return false;
+        if (action === 'discard') return true;
+
+        return await this.waitForSaveWithModal(child, this.closeSaveModalOptions);
+    }
+
+    private async showUnsavedChangesPromptModal(): Promise<'save' | 'discard' | 'cancel'> {
+        return await new Promise((resolve) => {
+            let decided = false;
+            const done = (value: 'save' | 'discard' | 'cancel') => {
+                if (decided) return;
+                decided = true;
+                resolve(value);
+                modal.close();
+            };
+
+            const modal = new Modal(this.app);
+            const onClose = modal.onClose.bind(modal);
+            modal.onOpen = () => {
+                modal.titleEl.setText('Unsaved PDF form changes');
+                modal.contentEl.empty();
+                modal.contentEl.createEl('p', {
+                    text: 'Save form changes before closing this PDF?',
+                    cls: 'pdf-plus-form-save-confirm-text',
+                });
+
+                const actionsEl = modal.contentEl.createDiv('pdf-plus-form-save-confirm-actions');
+                actionsEl.createEl('button', { text: 'Save', cls: 'mod-cta' })
+                    .addEventListener('click', () => done('save'));
+                actionsEl.createEl('button', { text: 'Don\'t save' })
+                    .addEventListener('click', () => done('discard'));
+                actionsEl.createEl('button', { text: 'Cancel' })
+                    .addEventListener('click', () => done('cancel'));
+            };
+            modal.onClose = () => {
+                onClose();
+                if (!decided) {
+                    decided = true;
+                    resolve('cancel');
+                }
+            };
+            modal.open();
+        });
+    }
+
+    private async waitForSaveWithModal(
+        child: PDFViewerChild,
+        options: { title: string; message: string },
+    ): Promise<boolean> {
+        if (!this.isDirty(child) && !this.isSaving(child)) return true;
+
+        return await new Promise((resolve) => {
+            let settled = false;
+            let cancelled = false;
+            let progressEl: HTMLElement | null = null;
+
+            const finish = (ok: boolean) => {
+                if (settled) return;
+                settled = true;
+                unregister?.();
+                resolve(ok);
+                modal.close();
+            };
+
+            const updateProgress = (progress: number) => {
+                if (!progressEl) return;
+                const pct = Math.min(99, Math.max(0, Math.round(progress)));
+                progressEl.setText(`Saving... ${pct}%`);
+            };
+
+            const modal = new Modal(this.app);
+            const onClose = modal.onClose.bind(modal);
+            modal.onOpen = () => {
+                modal.titleEl.setText(options.title);
+                modal.contentEl.empty();
+
+                const row = modal.contentEl.createDiv('pdf-plus-form-save-wait-row');
+                const spinnerEl = row.createDiv('pdf-plus-form-save-wait-spinner');
+                setIcon(spinnerEl, 'lucide-loader-circle');
+                spinnerEl.addClass('is-spinning');
+
+                progressEl = row.createDiv('pdf-plus-form-save-wait-message');
+                progressEl.setText(options.message);
+
+                const actionsEl = modal.contentEl.createDiv('pdf-plus-form-save-confirm-actions');
+                actionsEl.createEl('button', { text: 'Cancel' }).addEventListener('click', () => {
+                    cancelled = true;
+                    finish(false);
+                });
+            };
+            modal.onClose = () => {
+                onClose();
+                if (!settled) {
+                    settled = true;
+                    unregister?.();
+                    resolve(false);
+                }
+            };
+
+            const unregister = this.registerStateListener(child, ({ dirty, saving, progress }) => {
+                updateProgress(progress);
+                if (!cancelled && !dirty && !saving) {
+                    finish(true);
+                }
+            });
+
+            modal.open();
+
+            const canStartSave = this.isDirty(child) && !this.isSaving(child);
+            if (canStartSave) {
+                const savePromise = this.saveFormFields(child, { silent: true });
+                savePromise.then((ok) => {
+                    if (!ok && this.isDirty(child) && !settled) {
+                        new Notice(`${this.plugin.manifest.name}: Failed to save PDF form fields.`);
+                        finish(false);
+                    }
+                }).catch((e) => {
+                    console.error(e);
+                    if (!settled) {
+                        new Notice(`${this.plugin.manifest.name}: Failed to save PDF form fields.`);
+                        finish(false);
+                    }
+                });
+            } else if (!this.isDirty(child) && !this.isSaving(child)) {
+                finish(true);
+            }
+        });
+    }
+
     registerStateListener(child: PDFViewerChild, cb: FormSaveStateListener): () => void {
         let listeners = this.stateListeners.get(child);
         if (!listeners) {
@@ -161,16 +343,17 @@ export class PdfFormsLib extends PDFPlusLibSubmodule {
 
     private async getOrLoadPdfDoc(file: TFile): Promise<PDFDocument> {
         const cached = this.pdfDocCache.get(file.path);
-        if (cached && file.stat.mtime === cached.writeMtime) {
+        const currentFreshness = this.getFileFreshness(file);
+        if (cached && this.isFreshnessEqual(currentFreshness, cached.freshness)) {
             return cached.pdfDoc;
         }
-        const pdfDoc = await this.lib.loadPdfLibDocument(file);
         this.pdfDocCache.delete(file.path);
+        const pdfDoc = await this.lib.loadPdfLibDocument(file);
         return pdfDoc;
     }
 
     private cachePdfDoc(file: TFile, pdfDoc: PDFDocument) {
-        this.pdfDocCache.set(file.path, { pdfDoc, writeMtime: file.stat.mtime });
+        this.pdfDocCache.set(file.path, { pdfDoc, freshness: this.getFileFreshness(file) });
     }
 
     invalidatePdfDocCache(filePath: string) {
@@ -185,8 +368,10 @@ export class PdfFormsLib extends PDFPlusLibSubmodule {
 
         this.preloadingFiles.add(file.path);
         this.lib.loadPdfLibDocument(file).then((pdfDoc) => {
-            if (!this.pdfDocCache.has(file.path)) {
-                this.pdfDocCache.set(file.path, { pdfDoc, writeMtime: file.stat.mtime });
+            const currentFreshness = this.getFileFreshness(file);
+            const cached = this.pdfDocCache.get(file.path);
+            if (!cached || !this.isFreshnessEqual(cached.freshness, currentFreshness)) {
+                this.pdfDocCache.set(file.path, { pdfDoc, freshness: currentFreshness });
             }
         }).catch(() => {}).finally(() => {
             this.preloadingFiles.delete(file.path);
@@ -436,6 +621,7 @@ export class PdfFormsLib extends PDFPlusLibSubmodule {
 
     markDirty(child: PDFViewerChild) {
         const state = this.getState(child);
+        if (state.disposed) return;
         const wasDirty = state.dirty;
         state.dirty = true;
 
@@ -476,6 +662,9 @@ export class PdfFormsLib extends PDFPlusLibSubmodule {
     }
 
     private getAnnotationStorage(child: PDFViewerChild): any | null {
+        const viewerStorage = (child.pdfViewer.pdfViewer as any)?.annotationStorage;
+        if (viewerStorage) return viewerStorage;
+
         const pages = child.pdfViewer.pdfViewer?._pages;
         if (Array.isArray(pages)) {
             for (const pageView of pages) {
@@ -483,8 +672,26 @@ export class PdfFormsLib extends PDFPlusLibSubmodule {
                 if (storage) return storage;
             }
         }
-        const maybeStorage = (child.pdfViewer.pdfViewer as any)?.annotationStorage;
-        return maybeStorage ?? null;
+        return null;
+    }
+
+    private async flushPendingActiveFormEdit(child: PDFViewerChild) {
+        const viewerContainerEl = child.pdfViewer?.dom?.viewerContainerEl;
+        if (!viewerContainerEl) return;
+        const doc = viewerContainerEl.doc ?? viewerContainerEl.ownerDocument;
+        const activeEl = doc?.activeElement;
+        if (!(activeEl instanceof HTMLElement)) return;
+        if (!viewerContainerEl.contains(activeEl)) return;
+        if (!activeEl.closest('.annotationLayer')) return;
+        if (!activeEl.matches('input, textarea, select')) return;
+
+        // Some PDFs update annotation storage only after commit/blur.
+        activeEl.dispatchEvent(new Event('change', { bubbles: true }));
+        if (typeof (activeEl as any).blur === 'function') {
+            (activeEl as any).blur();
+        }
+
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     }
 
     async collectFormState(child: PDFViewerChild): Promise<CollectedPdfFormState> {
@@ -507,21 +714,11 @@ export class PdfFormsLib extends PDFPlusLibSubmodule {
                         const fieldTypeCode = first?.type ?? first?.fieldType ?? first?.fieldTypeCode ?? null;
                         const type = this.normalizeFieldType(fieldTypeCode, first);
 
-                        if (!fields.has(fieldName)) {
-                            const value = coerceToFieldValue(first?.value);
-                            fields.set(fieldName, {
-                                name: fieldName,
-                                type,
-                                value,
-                                source: 'fieldObjects',
-                            });
-                        }
-
                         if (Array.isArray(widgets)) {
                             for (const w of widgets) {
                                 const id = w?.id;
-                                if (typeof id === 'string' && id) {
-                                    widgetIdToFieldName.set(id, { name: fieldName, type });
+                                if ((typeof id === 'string' || typeof id === 'number') && id !== '') {
+                                    widgetIdToFieldName.set(String(id), { name: fieldName, type });
                                 }
                             }
                         }
@@ -536,7 +733,7 @@ export class PdfFormsLib extends PDFPlusLibSubmodule {
         if (annotationStorage) {
             const all =
                 typeof annotationStorage.getAll === 'function'
-                    ? annotationStorage.getAll()
+                    ? await annotationStorage.getAll()
                     : (annotationStorage.all ?? annotationStorage.storage ?? annotationStorage.serializable ?? null);
 
             for (const [widgetId, raw] of normalizeStorageEntries(all)) {
@@ -673,6 +870,8 @@ export class PdfFormsLib extends PDFPlusLibSubmodule {
 
     async saveFormFields(child: PDFViewerChild, options?: { silent?: boolean }): Promise<boolean> {
         const silent = options?.silent ?? false;
+        const state = this.getState(child);
+        if (!this.isChildUsableForSave(child, state)) return false;
 
         if (!this.isEnabled()) {
             if (!silent) {
@@ -691,7 +890,6 @@ export class PdfFormsLib extends PDFPlusLibSubmodule {
         const file = child.file;
         if (!(file instanceof TFile)) return false;
 
-        const state = this.getState(child);
         if (!silent && state.timerId !== null) {
             window.clearTimeout(state.timerId);
             state.timerId = null;
@@ -709,15 +907,24 @@ export class PdfFormsLib extends PDFPlusLibSubmodule {
         this.notifyListeners(child, 0);
 
         try {
+            const sourceFreshness = this.getFileFreshness(file);
+
             // Phase 1: Collect form state (re-collect as late as possible to capture recent edits)
             this.notifyListeners(child, 5);
+            await this.flushPendingActiveFormEdit(child);
             const collected = await this.collectFormState(child);
-            if (!collected.hasForms || collected.fields.size === 0) {
+            if (!collected.hasForms) {
                 if (!silent) {
                     new Notice(`${this.plugin.manifest.name}: No form fields found in this PDF.`);
                 }
-                state.dirty = false;
-                this.notifyListeners(child, 100);
+                this.notifyListeners(child, 0);
+                return false;
+            }
+            if (collected.fields.size === 0) {
+                if (!silent) {
+                    new Notice(`${this.plugin.manifest.name}: Could not read form field values from the current viewer state. Try again after the page finishes rendering.`);
+                }
+                this.notifyListeners(child, 0);
                 return false;
             }
 
@@ -738,10 +945,23 @@ export class PdfFormsLib extends PDFPlusLibSubmodule {
 
             // Phase 5: Write to vault
             this.notifyListeners(child, 80);
+            const preWriteFreshness = this.getFileFreshness(file);
+            if (!this.isFreshnessEqual(preWriteFreshness, sourceFreshness)) {
+                this.invalidatePdfDocCache(file.path);
+                state.dirty = true;
+                this.notifyListeners(child, 0);
+                new Notice(`${this.plugin.manifest.name}: The PDF changed before form save completed. Save aborted to avoid overwriting newer content.`);
+                return false;
+            }
             await this.app.vault.modifyBinary(file, buffer);
 
             // Cache the PDFDocument for next save
-            this.cachePdfDoc(file, pdfDoc);
+            const latest = this.app.vault.getAbstractFileByPath(file.path);
+            if (latest instanceof TFile) {
+                this.cachePdfDoc(latest, pdfDoc);
+            } else {
+                this.invalidatePdfDocCache(file.path);
+            }
 
             state.dirty = false;
             this.notifyListeners(child, 100);
@@ -757,7 +977,7 @@ export class PdfFormsLib extends PDFPlusLibSubmodule {
             state.queued = false;
             state.queuedSilent = true;
             this.notifyListeners(child, 0);
-            if (shouldRunAgain) {
+            if (shouldRunAgain && this.isChildUsableForSave(child, state)) {
                 this.saveFormFields(child, { silent: queuedSilent }).catch((e) => console.error(e));
             }
         }
@@ -765,24 +985,15 @@ export class PdfFormsLib extends PDFPlusLibSubmodule {
 
     onChildUnload(child: PDFViewerChild) {
         const state = this.getState(child);
+        state.disposed = true;
         if (state.timerId !== null) {
             window.clearTimeout(state.timerId);
             state.timerId = null;
         }
-
-        if (this.isAutoSaveEnabled() && state.dirty) {
-            this.saveFormFields(child, { silent: true }).catch((e) => console.error(e));
-        }
+        state.queued = false;
+        state.queuedSilent = true;
 
         this.stateListeners.delete(child);
-    }
-
-    private async writeFormStateToFile(file: TFile, fields: Map<string, CollectedPdfFormFieldState>) {
-        const pdfDoc = await this.getOrLoadPdfDoc(file);
-        await this.applyFormStateToPdfLibDocument(pdfDoc, fields);
-        const buffer = await pdfDoc.save();
-        await this.app.vault.modifyBinary(file, buffer);
-        this.cachePdfDoc(file, pdfDoc);
     }
 
     private async applyFormStateToPdfLibDocument(pdfDoc: PDFDocument, fields: Map<string, CollectedPdfFormFieldState>) {

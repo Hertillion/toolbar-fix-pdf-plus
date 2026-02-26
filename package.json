@@ -12,8 +12,10 @@
     "keywords": [],
     "author": "Ryota Ushio",
     "license": "MIT",
+    "dependencies": {
+        "@cantoo/pdf-lib": "^2.4.3"
+    },
     "devDependencies": {
-        "@cantoo/pdf-lib": "^2.4.3",
         "@capacitor/app": "^7.0.2",
         "@capacitor/core": "^7.4.3",
         "@capacitor/device": "^7.0.2",

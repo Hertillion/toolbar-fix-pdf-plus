@@ -158,6 +158,8 @@ export interface PDFPlusSettings {
 	autoSavePdfForms: boolean;
 	/** Debounce interval for auto-saving form fields (ms). */
 	autoSavePdfFormsDebounceMs: number;
+	/** Warn or block when closing/switching away with unsaved PDF form edits. */
+	confirmUnsavedPdfFormsOnClose: boolean;
 	author: string;
 	writeHighlightToFileOpacity: number;
 	defaultWriteFileToggle: boolean;
@@ -436,6 +438,7 @@ export const DEFAULT_SETTINGS: PDFPlusSettings = {
 	enablePdfFormSave: true,
 	autoSavePdfForms: false,
 	autoSavePdfFormsDebounceMs: 2000,
+	confirmUnsavedPdfFormsOnClose: true,
 	author: '',
 	writeHighlightToFileOpacity: 0.2,
 	defaultWriteFileToggle: false,
@@ -1680,6 +1683,10 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 						.setName('Auto-save debounce (ms)')
 						.setDesc('How long to wait after the last form edit before saving.');
 				}
+
+				this.addToggleSetting('confirmUnsavedPdfFormsOnClose')
+					.setName('Confirm unsaved form edits when closing PDF')
+					.setDesc('When leaving a PDF with unsaved form edits, show a prompt. If auto-save is enabled, PDF++ will show a blocking “Saving...” dialog until save completes (or you cancel leaving).');
 			}
 			// this.addToggleSetting('enableEditEncryptedPDF')
 			// .setName('Enable editing encrypted PDF files');

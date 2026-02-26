@@ -102,6 +102,7 @@ export class ColorPalette extends PDFPlusComponent {
     }
 
     onunload() {
+        this.removeSaveFormButton();
         this.spacerEl?.remove();
         if (this.paletteEl) {
             this.paletteEl.remove();
