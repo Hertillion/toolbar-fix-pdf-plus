@@ -24,7 +24,7 @@ export class PDFCroppedEmbed extends Component implements Embed {
         this.containerEl = ctx.containerEl;
         this.rect = window.pdfjsLib.Util.normalizeRect(rect);
         this.containerEl.addClass('pdf-cropped-embed');
-        if (width) this.containerEl.setAttribute('width', '' + width);
+        this.applyWidth();
     }
 
     onload() {
@@ -61,13 +61,25 @@ export class PDFCroppedEmbed extends Component implements Embed {
                 imgEl.addEventListener('load', () => resolve());
                 imgEl.addEventListener('error', (err) => reject(err));
 
-                const width = this.containerEl.getAttribute('width');
                 const height = this.containerEl.getAttribute('height');
-                if (width) imgEl.setAttribute('width', width);
+                const width = this.getValidWidth();
+                if (width) imgEl.setAttribute('width', '' + width);
                 if (height) imgEl.setAttribute('height', height);
             });
             activeWindow.setTimeout(() => reject(), 5000);
         });
+    }
+
+    getValidWidth() {
+        return typeof this.width === 'number' && Number.isFinite(this.width) && this.width > 0 ? this.width : undefined;
+    }
+
+    applyWidth() {
+        const width = this.getValidWidth();
+        if (!width) return;
+
+        this.containerEl.setAttribute('width', '' + width);
+        this.containerEl.style.setProperty('--container-pdf-cropped-width', `${width}px`);
     }
 
     async computeDataUrl() {
