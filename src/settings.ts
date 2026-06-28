@@ -253,6 +253,7 @@ export interface PDFPlusSettings {
 	rectImageFormat: 'file' | 'data-url';
 	rectImageExtension: ImageExtension;
 	rectEmbedResolution: number;
+	rectSelectionPrecisionDecimals: number;
 	zoomToFitRect: boolean;
 	rectFollowAdaptToTheme: boolean;
 	includeColorWhenCopyingRectLink: boolean;
@@ -542,6 +543,7 @@ export const DEFAULT_SETTINGS: PDFPlusSettings = {
 	zoomToFitRect: false,
 	rectFollowAdaptToTheme: true,
 	rectEmbedResolution: 100,
+	rectSelectionPrecisionDecimals: 0,
 	includeColorWhenCopyingRectLink: true,
 	backlinkIconSize: 50,
 	showBacklinkIconForSelection: false,
@@ -1830,6 +1832,9 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 				el.appendChild(this.createLinkTo('dblclickEmbedToOpenLink'));
 				el.appendText(' option as well.');
 			}));
+		this.addSliderSetting('rectSelectionPrecisionDecimals', 0, 15, 1)
+			.setName('Selection precision (coordinate decimal places)')
+			.setDesc('Set the precision of the rectangular selection tool by the number of decimal places used for the coordinate points. Default is 0.');
 
 
 		this.addHeading('PDF++ callouts', 'callout', 'lucide-quote')
