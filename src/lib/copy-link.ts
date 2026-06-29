@@ -425,7 +425,8 @@ export class copyLinkLib extends PDFPlusLibSubmodule {
 
         if (!checking) {
             const display = this.getDisplayText(child, undefined, file, pageNumber, '');
-            let subpath = `#page=${pageNumber}&rect=${rect.map((num) => Math.round(num)).join(',')}`;
+            const precision = this.settings.rectSelectionPrecisionDecimals;
+            let subpath = `#page=${pageNumber}&rect=${rect.map((num) => Math.round(num * 10**precision)/10**precision).join(',')}`;
             if (colorName) subpath += `&color=${colorName}`;
             const embedLink = this.lib.generateMarkdownLink(file, sourcePath ?? '', subpath, display);
 
