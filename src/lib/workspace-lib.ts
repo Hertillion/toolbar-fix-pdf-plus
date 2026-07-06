@@ -404,8 +404,8 @@ export class WorkspaceLib extends PDFPlusLibSubmodule {
      * @returns An object containing a boolean value indicating whether a tab with the target PDF file already exists and a promise that resolves when the link is opened.
      */
     openPDFLinkTextInExistingLeafForTargetPDF(linktext: string, sourcePath: string, openViewState?: OpenViewState, targetFile?: TFile): { exists: boolean, promise: Promise<void> } {
+        const { path, subpath } = parseLinktext(linktext);
         if (!targetFile) {
-            const { path } = parseLinktext(linktext);
             targetFile = this.app.metadataCache.getFirstLinkpathDest(path, sourcePath) ?? undefined;
         }
         if (!targetFile) return { exists: false, promise: Promise.resolve() };
@@ -424,6 +424,11 @@ export class WorkspaceLib extends PDFPlusLibSubmodule {
         if (sameFileLeaf.isVisible() && this.settings.highlightExistingTab) {
             sameFileLeaf.containerEl.addClass('pdf-plus-link-opened', 'is-highlighted');
             setTimeout(() => sameFileLeaf.containerEl.removeClass('pdf-plus-link-opened', 'is-highlighted'), this.settings.existingTabHighlightDuration * 1000);
+        }
+
+        if (!subpath) {
+            const promise = this.revealLeaf(sameFileLeaf);
+            return { exists: true, promise };
         }
 
         const promise = this.openPDFLinkTextInLeaf(sameFileLeaf, linktext, sourcePath, openViewState);

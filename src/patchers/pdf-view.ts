@@ -6,6 +6,25 @@ import { PDFView } from 'typings';
 import { patchPDFInternals } from './pdf-internals';
 
 
+const getPDFPlusLastGoodState = (view: PDFView, file?: string) => {
+    const state = view.viewer.child?.pdfPlusLastGoodState ?? view.pdfPlusLastGoodState;
+    if (!state || state.file !== file) return null;
+    return state;
+};
+
+const setPDFPlusLastGoodState = (view: PDFView, state: ReturnType<PDFView['getState']>) => {
+    view.pdfPlusLastGoodState = { ...state };
+    const child = view.viewer.child;
+    if (child) child.pdfPlusLastGoodState = { ...state };
+};
+
+const isSafePDFState = (state: ReturnType<PDFView['getState']>) => {
+    return typeof state.page === 'number'
+        && state.page > 0
+        && typeof state.left === 'number'
+        && typeof state.top === 'number';
+};
+
 export const patchPDFView = (plugin: PDFPlus): boolean => {
     if (plugin.patchStatus.pdfView && plugin.patchStatus.pdfInternals) return true;
 
@@ -27,11 +46,21 @@ export const patchPDFView = (plugin: PDFPlus): boolean => {
                         // pdfViewer._location?.pageNumber points to the previous page, but 
                         // currentPageNumber points to the current page.
                         // For our purpose, the former is preferable, so we use it if available.
-                        ret.page = pdfViewer._location?.pageNumber ?? pdfViewer.currentPageNumber;
-                        ret.left = pdfViewer._location?.left;
-                        ret.top = pdfViewer._location?.top;
+                        const location = pdfViewer._location;
+                        if (location) {
+                            ret.page = location.pageNumber;
+                            ret.left = location.left;
+                            ret.top = location.top;
+                        } else {
+                            const lastGoodState = getPDFPlusLastGoodState(self, ret.file);
+                            if (lastGoodState) return { ...ret, ...lastGoodState };
+                            ret.page = pdfViewer.currentPageNumber;
+                            delete ret.left;
+                            delete ret.top;
+                        }
                         ret.zoom = pdfViewer.currentScale;
                     }
+                    if (isSafePDFState(ret)) setPDFPlusLastGoodState(self, ret);
                     return ret;
                 };
             },
@@ -44,6 +73,7 @@ export const patchPDFView = (plugin: PDFPlus): boolean => {
                         const self = this as PDFView;
                         const child = self.viewer.child;
                         const pdfViewer = child?.pdfViewer?.pdfViewer;
+                        if (isSafePDFState(state)) setPDFPlusLastGoodState(self, state);
                         if (typeof state.page === 'number') {
                             if (pdfViewer) {
                                 lib.applyPDFViewStateToViewer(pdfViewer, state);

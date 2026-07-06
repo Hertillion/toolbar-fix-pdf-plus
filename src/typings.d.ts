@@ -75,6 +75,7 @@ interface PDFView extends EditableFileView {
     showSearch(): void;
     getState(): PDFViewState;
     setState(state: PDFViewState, result: ViewStateResult): Promise<void>;
+    pdfPlusLastGoodState?: PDFViewState;
 }
 
 type PDFViewState = {
@@ -135,6 +136,8 @@ interface PDFViewerChild {
     activeAnnotationPopupEl: HTMLElement | null;
     /** The PDF file that is currently loaded in the viewer. */
     file: TFile | null;
+    /** Last known safe page/offset state for this viewer. */
+    pdfPlusLastGoodState?: PDFViewState;
     /** Called right after the instantiation. Performs various initialization that is not file-specific. */
     load(): Promise<void>;
     /** Called when the parent `PDFViewerComponent` is unloaded. */

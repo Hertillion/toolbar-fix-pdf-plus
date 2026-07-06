@@ -57,7 +57,13 @@ export const patchPDFInternals = async (plugin: PDFPlus, pdfViewerComponent: PDF
 function onPDFInternalsPatchSuccess(plugin: PDFPlus) {
     const { lib } = plugin;
     // For the detail of `plugin.subpathWhenPatched`, see its docstring.
-    lib.workspace.iteratePDFViews((view) => reloadPDFViewerComponent(view.viewer, view.file, plugin.subpathWhenPatched));
+    const activePDFView = lib.getPDFView(true);
+    lib.workspace.iteratePDFViews((view) => {
+        const stateSubpath = lib.viewStateToSubpath(view.getState());
+        const subpath = stateSubpath ?? (view === activePDFView ? plugin.subpathWhenPatched : undefined);
+        reloadPDFViewerComponent(view.viewer, view.file, subpath);
+    });
+    delete plugin.subpathWhenPatched;
     // Without passing `embed.subpath`, the embed will display the first page of the PDF file regardless of the subpath,
     // in which case the subpath like `...#page=5` will be ignored.
     // See https://github.com/RyotaUshio/obsidian-pdf-plus/issues/322
