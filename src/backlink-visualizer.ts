@@ -8,6 +8,7 @@ import { MultiValuedMap, getTextLayerInfo, isCanvas, isEmbed, isHoverPopover, is
 import { onBacklinkVisualizerContextMenu } from 'context-menu';
 import { BidirectionalMultiValuedMap } from 'utils';
 import { MergedRect } from 'lib/highlights/geometry';
+import { BacklinkHighlightPointerDelegate } from 'backlink-pointer-delegate';
 
 
 export class PDFBacklinkVisualizer extends PDFPlusComponent {
@@ -38,6 +39,7 @@ export class BacklinkDomManager extends PDFPlusComponent {
     private pagewiseCacheToDomsMap = new Map<number, BidirectionalMultiValuedMap<PDFBacklinkCache, HTMLElement>>;
     private pagewiseStatus = new Map<number, { onPageReady: boolean, onTextLayerReady: boolean, onAnnotationLayerReady: boolean }>;
     private pagewiseOnClearDomCallbacksMap = new MultiValuedMap<number, () => any>();
+    private pagewisePointerDelegate = new Map<number, BacklinkHighlightPointerDelegate>();
 
     constructor(visualizer: PDFViewerBacklinkVisualizer) {
         super(visualizer.plugin);
@@ -59,6 +61,12 @@ export class BacklinkDomManager extends PDFPlusComponent {
     }
 
     clearDomInPage(pageNumber: number) {
+        const delegate = this.pagewisePointerDelegate.get(pageNumber);
+        if (delegate) {
+            this.removeChild(delegate);
+            this.pagewisePointerDelegate.delete(pageNumber);
+        }
+
         const cacheToDoms = this.getCacheToDomsMap(pageNumber);
         for (const el of cacheToDoms.values()) {
             // Avoid removing elements in the annotation layer
@@ -113,6 +121,30 @@ export class BacklinkDomManager extends PDFPlusComponent {
                 this.setHighlightColor(el, color);
             }
         }
+
+        this.setUpPointerDelegate(pageNumber);
+    }
+
+    /**
+     * The highlights in the backlink highlight layer are click-through so that they don't
+     * break text selection (see `styles.css`), which means the mouse events hooked above
+     * never reach them on their own. This delegate re-dispatches those events based on the
+     * pointer position. See `BacklinkHighlightPointerDelegate` for the details.
+     */
+    setUpPointerDelegate(pageNumber: number) {
+        const existing = this.pagewisePointerDelegate.get(pageNumber);
+        if (existing) {
+            // The set of highlights may have changed since the delegate was created.
+            existing.invalidateHitRects();
+            return;
+        }
+
+        const pageView = this.visualizer.child.getPage(pageNumber);
+        const layerEl = pageView.div.querySelector<HTMLElement>('div.pdf-plus-backlink-highlight-layer');
+        if (!layerEl) return;
+
+        const delegate = this.addChild(new BacklinkHighlightPointerDelegate(pageView.div, layerEl));
+        this.pagewisePointerDelegate.set(pageNumber, delegate);
     }
 
     hookBacklinkOpeners(el: HTMLElement, cache: PDFBacklinkCache) {
