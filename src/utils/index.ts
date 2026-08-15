@@ -129,20 +129,27 @@ export function getTextLayerNode(pageEl: HTMLElement, node: Node) {
     return null;
 }
 
-// Taken from app.js.
+// Originally taken from app.js.
 // Takes care of the cases where the textLayerNode has multiple text nodes (I haven't experienced it though).
 // => Maybe it takes search matches into account
 export function getOffsetInTextLayerNode(textLayerNode: HTMLElement, node: Node, offsetInNode: number) {
     if (!textLayerNode.contains(node)) return null;
 
-    const iterator = textLayerNode.doc.createNodeIterator(textLayerNode, NodeFilter.SHOW_TEXT);
-    let textNode;
-    let offset = offsetInNode;
-    while ((textNode = iterator.nextNode()) && node !== textNode) { // Iterate over text nodes that come before `node`.
-        offset += textNode.textContent!.length;
-    }
+    // A range boundary point is either (text node, offset in characters) or
+    // (element, offset in *child nodes*), and both kinds show up here: when a selection ends
+    // exactly on the boundary between two text layer nodes, the browser normalizes the end
+    // point to (next textLayerNode, 0) rather than to the end of the previous text node.
+    //
+    // Measuring with a range handles both. Walking the text nodes and looking for `node`
+    // among them does not: for an element boundary point the comparison never matches, the
+    // loop runs to completion, and the function returns the length of the node's entire text.
+    // A selection ending right before ") for PCG expression..." was therefore recorded as
+    // ending *after* it, and the resulting highlight covered text that was never selected.
+    const range = textLayerNode.doc.createRange();
+    range.setStart(textLayerNode, 0);
+    range.setEnd(node, offsetInNode);
 
-    return offset;
+    return range.toString().length;
 }
 
 /**
