@@ -1,4 +1,4 @@
-import { Component, MarkdownRenderer, Notice, TFile, debounce, setIcon, setTooltip, Keymap, Menu, Platform, requireApiVersion, apiVersion } from 'obsidian';
+import { Component, MarkdownRenderer, Notice, TFile, debounce, setIcon, setTooltip, Keymap, Menu, Platform, requireApiVersion } from 'obsidian';
 import { around } from 'monkey-around';
 import { PDFDocumentProxy } from 'pdfjs-dist';
 
@@ -707,28 +707,42 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                 return embedLink.slice(1);
             };
         },
-        // The following patch fixes the bug reported in https://forum.obsidian.md/t/in-1-8-0-pdf-copy-link-to-selection-fails-to-copy-proper-links-in-some-cases/93545
+        // This patch was originally added for https://forum.obsidian.md/t/in-1-8-0-pdf-copy-link-to-selection-fails-to-copy-proper-links-in-some-cases/93545
         // (WhiteNoise said "will be fixed in 1.8.2" but it was actually fixed in Obsidian 1.8.1: see https://obsidian.md/changelog/2025-01-07-desktop-v1.8.1/)
-        // Therefore the method will be patched only if the Obsidian version is exactly 1.8.0.
-        // See also https://github.com/RyotaUshio/obsidian-pdf-plus/issues/327
-        ...(
-            apiVersion === '1.8.0'
-                ? {
-                    getTextSelectionRangeStr() {
-                        return function (this: PDFViewerChild, pageEl: HTMLElement) {
-                            const selection = pageEl.win.getSelection();
-                            const range = (selection && selection.rangeCount > 0) ? selection.getRangeAt(0) : null;
-                            const textSelectionRange = range && lib.copyLink.getTextSelectionRange(pageEl, range);
-                            if (textSelectionRange) {
-                                const { beginIndex, beginOffset, endIndex, endOffset } = textSelectionRange;
-                                return `${beginIndex},${beginOffset},${endIndex},${endOffset}`;
-                            }
-                            return null;
-                        };
-                    }
+        // and was therefore applied only on Obsidian 1.8.0. See also https://github.com/RyotaUshio/obsidian-pdf-plus/issues/327
+        //
+        // It is now applied unconditionally, because Obsidian's own implementation records
+        // selections that are wider than what the user selected. Its offset helper walks the
+        // text layer node's text nodes until it finds the range boundary's container:
+        //
+        //     function E1(e, t, n) {
+        //         if (!e.contains(t)) return null;
+        //         for (var i, r = e.doc.createNodeIterator(e, NodeFilter.SHOW_TEXT), o = n; (i = r.nextNode()) && t !== i;)
+        //             o += i.textContent.length;
+        //         return o
+        //     }
+        //
+        // That assumes the boundary sits on a text node. It can just as well sit on an element,
+        // where the offset counts child nodes instead of characters — which is what the browser
+        // produces when a selection ends on the seam between two text layer nodes (superscripts
+        // make this easy to hit, since they are separate text items) or when text is selected by
+        // double-clicking. For those, the loop never finds its target, runs to completion, and
+        // returns the node's entire text length.
+        //
+        // `lib.copyLink.getTextSelectionRange` measures with a range instead, which is defined
+        // for both kinds of boundary point. `textDivFirstIdx` keeps the 1.8.0 index adjustment.
+        getTextSelectionRangeStr() {
+            return function (this: PDFViewerChild, pageEl: HTMLElement) {
+                const selection = pageEl.win.getSelection();
+                const range = (selection && selection.rangeCount > 0) ? selection.getRangeAt(0) : null;
+                const textSelectionRange = range && lib.copyLink.getTextSelectionRange(pageEl, range);
+                if (textSelectionRange) {
+                    const { beginIndex, beginOffset, endIndex, endOffset } = textSelectionRange;
+                    return `${beginIndex},${beginOffset},${endIndex},${endOffset}`;
                 }
-                : {}
-        ),
+                return null;
+            };
+        },
         getPageLinkAlias(old) {
             return function (this: PDFViewerChild, page: number): string {
                 if (this.file) {
