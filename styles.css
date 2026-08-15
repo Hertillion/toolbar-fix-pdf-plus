@@ -365,7 +365,12 @@ settings:
 
 .pdf-plus-backlink-highlight-layer .pdf-plus-backlink {
     position: absolute;
-    pointer-events: auto;
+    /* The highlights must not take part in hit-testing. They sit on top of the text layer and
+       contain no text node, so a mousedown landing on one gives the browser no caret position
+       to anchor a text selection to, which makes already-highlighted text impossible to select.
+       The mouse events they do need (mouseover/mouseout, dblclick, contextmenu) are re-dispatched
+       by BacklinkHighlightPointerDelegate instead. */
+    pointer-events: none;
 }
 
 .pdf-plus-backlink-highlight-layer .pdf-plus-backlink.pdf-plus-backlink-selection {
