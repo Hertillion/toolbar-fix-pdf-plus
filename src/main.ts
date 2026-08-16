@@ -14,6 +14,7 @@ import { InstallerVersionModal } from 'modals';
 import { PDFExternalLinkPostProcessor, PDFInternalLinkPostProcessor, PDFOutlineItemPostProcessor, PDFThumbnailItemPostProcessor } from 'post-process';
 import { BibliographyManager } from 'bib';
 import { DataviewInlineFieldsModal, withFilesWithInlineFields } from 'lib/dataview';
+import { alignTextLayer } from 'text-layer-fonts';
 
 
 export default class PDFPlus extends Plugin {
@@ -903,6 +904,14 @@ export default class PDFPlus extends Plugin {
 		return this.app.internalPlugins.plugins['page-preview'].instance.overrides[id]
 			?? this.app.workspace.hoverLinkSources[id]?.defaultMod
 			?? false;
+	}
+
+	/** Apply or undo the experimental text layer alignment in every open PDF viewer. */
+	refreshTextLayerAlignment() {
+		const align = this.settings.useEmbeddedFontsInTextLayer;
+		this.lib.workspace.iteratePDFViewerChild((child) => {
+			child.pdfViewer?.pdfViewer?._pages?.forEach((pageView) => alignTextLayer(pageView, align));
+		});
 	}
 
 	openSettingTab(): PDFPlusSettingTab {

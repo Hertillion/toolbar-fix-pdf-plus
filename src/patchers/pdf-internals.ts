@@ -11,6 +11,7 @@ import { patchPDFOutlineViewer } from 'patchers';
 import { PDFViewerBacklinkVisualizer } from 'backlink-visualizer';
 import { PDFPlusToolbar } from 'toolbar';
 import { BibliographyManager } from 'bib';
+import { alignTextLayer } from 'text-layer-fonts';
 import { camelCaseToKebabCase, getCharactersWithBoundingBoxesInPDFCoords, getTextLayerInfo, hookInternalLinkMouseEventHandlers, isEmbed, isModifierName, isNonEmbedLike, selectDoubleClickedWord, selectTrippleClickedTextLayerNode, showChildElOnParentElHover } from 'utils';
 import { AnnotationElement, PDFOutlineViewer, PDFViewerComponent, PDFViewerChild, PDFSearchSettings, Rect, PDFAnnotationHighlight, PDFTextHighlight, PDFRectHighlight, ObsidianViewer, PDFPageView } from 'typings';
 import { SidebarView, SpreadMode } from 'pdfjs-enums';
@@ -289,6 +290,14 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                             }
                         });
                     }
+                }
+
+                if (this.pdfViewer?.eventBus) {
+                    // Experimental: re-position the text layer using the per-character boxes that
+                    // Obsidian's PDF.js exposes, so that hit-testing matches the painted glyphs.
+                    this.pdfViewer.eventBus.on('textlayerrendered', ({ source: pageView }) => {
+                        if (plugin.settings.useEmbeddedFontsInTextLayer) alignTextLayer(pageView, true);
+                    });
                 }
 
                 // Fix for the Obsidian core issue where the "find next" button in the find bar has a wrong icon
