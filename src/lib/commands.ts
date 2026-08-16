@@ -11,6 +11,8 @@ import { SidebarView } from 'pdfjs-enums';
 import { showContextMenuAtSelection } from 'context-menu';
 import { RestoreDefaultModal } from 'modals/restore-default-modal';
 import { DataviewInlineFieldsModal } from './dataview';
+import { alignTextLayer } from 'text-layer-fonts';
+import { reportTextLayerAlignment } from 'text-layer-fonts-debug';
 
 
 export class PDFPlusCommands extends PDFPlusLibSubmodule {
@@ -35,6 +37,10 @@ export class PDFPlusCommands extends PDFPlusLibSubmodule {
             //     checkCallback: (checking) => this.createCanvasCard(checking)
             // },
             {
+                id: 'report-text-layer-alignment',
+                name: 'Report text layer alignment for this page (debug)',
+                checkCallback: (checking) => this.reportTextLayerAlignment(checking)
+            }, {
                 id: 'context-menu',
                 name: 'Show context menu at selection',
                 checkCallback: (checking) => this.showContextMenu(checking)
@@ -500,6 +506,59 @@ export class PDFPlusCommands extends PDFPlusLibSubmodule {
         }
 
         return false;
+    }
+
+    /**
+     * Measure, in PDF points, how far the selectable text layer sits from the glyphs that are
+     * actually painted. Run it with "Align the text layer with the printed text" off and then on
+     * to see what that option buys.
+     */
+    reportTextLayerAlignment(checking: boolean) {
+        const viewer = this.lib.getPDFViewer(true);
+        if (!viewer) return false;
+
+        if (!checking) {
+            const pageView = this.lib.getPage(true);
+            if (!pageView?.textLayer) {
+                new Notice(`${this.plugin.manifest.name}: this page has no text layer yet.`);
+                return true;
+            }
+
+            const pageNumber = viewer.currentPageNumber;
+            const restore = this.plugin.settings.useEmbeddedFontsInTextLayer;
+
+            // Measure both states in one go rather than asking the user to flip the setting
+            // between two runs: it removes any doubt about which state a number came from.
+            alignTextLayer(pageView, false);
+            const off = reportTextLayerAlignment(pageView, pageNumber, 'OFF');
+
+            // Time a cold alignment of the whole page: this is what the option adds to the
+            // rendering of each page, and it is the only work it does per page.
+            const startedAt = performance.now();
+            alignTextLayer(pageView, true);
+            const elapsed = performance.now() - startedAt;
+
+            const on = reportTextLayerAlignment(pageView, pageNumber, 'ON');
+            alignTextLayer(pageView, restore);
+
+            console.log(`[PDF++] text layer alignment, page ${pageNumber}`, { off, on, alignMs: elapsed });
+            const summarize = (r: typeof off) =>
+                `${r.alignedNodes}/${r.items} nodes, ${r.elements} els, ${r.gaps.toFixed(0)}pt gaps `
+                + `| within-item drift: mean `
+                + `${r.meanAbsRelDx.toFixed(2)}pt, max ${r.maxAbsRelDx.toFixed(2)}pt `
+                + `| raw: mean ${r.meanAbsDx.toFixed(2)}pt, max ${r.maxAbsDx.toFixed(2)}pt, `
+                + `signed ${r.meanDx.toFixed(2)}pt `
+                + `| ${r.misHits}/${r.characters} mis-hits, `
+                + `${r.caretMisses}/${r.caretProbes} caret misses `
+                + `| skipped ${r.skipped.notAlignable}/${r.skipped.charsMismatch}/${r.skipped.domMismatch}`;
+            new Notice(
+                `${this.plugin.manifest.name} page ${pageNumber} (aligning took ${elapsed.toFixed(1)}ms)`
+                + `\nOFF: ${summarize(off)}\nON: ${summarize(on)}`,
+                15000
+            );
+        }
+
+        return true;
     }
 
     toggleAdaptToTheme(checking: boolean, enable?: boolean) {
